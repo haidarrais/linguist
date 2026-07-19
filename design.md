@@ -1,150 +1,64 @@
-# Project Linguist — Product & UX Design
+# TeachBack — product and interaction design
 
-## Product brief
+## Product promise
 
-**Pitch:** Project Linguist helps a K–12 teacher turn an existing lesson into a teacher-reviewed multilingual learning package, so learners who do not yet understand the classroom language can participate in the same lesson.
+TeachBack gives a student a deliberately mistaken simulated novice to teach. The student must explain a source-grounded mechanism and apply it to a new case. The teacher—not the model—uses the resulting trace as one input to the next instructional conversation.
 
-- **Primary user:** A K–12 classroom teacher supporting multilingual learners in a mixed-ability class.
-- **Painful moment:** Tomorrow’s worksheet is ready, but adapting it for several language needs takes too long to do well.
-- **MVP outcome:** In one short session, a teacher can add a lesson, generate language packages for up to three target languages, review one package at a time, approve it, and print a student-ready handout.
-- **Evidence:** The strategy brief identifies language barriers and teacher workload as linked, high-impact education problems. See [hackathon.md](hackathon.md).
+The design goal is not to prove authorship or rank a learner. It is to make a specific reasoning relationship visible in a short, humane interaction.
 
-## Scope
+## People and jobs
 
-### P0 — Working vertical slice
+| Person | Job | What TeachBack gives them |
+| --- | --- | --- |
+| Teacher | Turn a short source and learning goal into a focused explanation activity | A reviewable concept map, one bounded misconception, and final human control |
+| Student | Show reasoning without being asked to defend a whole finished artifact | A novice to teach, a revision-oriented response, and one novel transfer case |
+| Reviewer | Understand what occurred without guessing from a score | Transcript, evidence items, source map, and an explicitly non-prescriptive next step |
 
-1. Paste lesson text or upload a text-readable PDF.
-2. Choose one to three target languages and a reading level.
-3. Generate a package for each selected language.
-4. Review, edit, regenerate, and approve individual sections.
-5. Print or save an approved package as a PDF from the browser.
+## Four-screen information architecture
 
-### P1 — Credibility and resilience
+1. **Set the source** — a teacher enters a title, context, learning goal, and de-identified source packet, or opens the deterministic Greenwater demo.
+2. **Approve the twin** — the teacher checks literal source anchors, concept relationships, uncertainty, and the simulated novice’s misconception before release.
+3. **Teach it** — the student repairs the misconception in their own words. The twin shows only the simulated concept state, never a hidden learner score.
+4. **Review evidence** — after a novel transfer case, the teacher sees a trace and decides whether to use the optional learning note.
 
-- A deterministic fixture demo when live generation is unavailable.
-- Clear PDF parsing, generation, malformed-output, and network-error recovery.
-- Keyboard, focus, contrast, screen-reader status, and mobile-layout checks.
+The progress header makes the workflow legible. The visual hierarchy deliberately places teacher gates at the moment of release and at the moment of use, rather than hiding safeguards in a settings panel.
 
-### Non-goals
+## Interaction rules
 
-- Student accounts, class rosters, LMS integration, analytics, saved history, grading, text-to-speech, or automated instructional decisions.
-- Claims of certified translation, curriculum alignment, or production compliance.
+- The first question asks for a causal explanation from the approved packet.
+- The twin gives a concise response about the simulated novice’s missing link; it does not write a polished answer for the student.
+- A successful explanation unlocks a genuinely new transfer case. A weak answer stays in the current stage and gets a targeted revision prompt.
+- The summary state appears only after transfer. It is labelled a learning trace, not a verdict.
+- The fixture is visually labelled **OFFLINE FIXTURE**; the live path is labelled **GPT-5.6 LIVE**. Judges are never asked to confuse a scripted path with a live generation.
 
-## Core flow and information architecture
+## State model
 
 ```text
-Start → Add lesson → Set learner needs → Generate → Review one language → Approve → Print/export
+draft source map
+  → teacher approved
+  → explanation in progress
+  → transfer in progress
+  → ready for teacher review
+  → teacher reviewed locally
 ```
 
-| Screen | Purpose | Essential content | Primary action |
-| --- | --- | --- | --- |
-| Start | Establish the task | Short promise, demo-fixture option, privacy reminder | Start adapting a lesson |
-| Source & settings | Prepare one transformation request | Paste area, PDF upload, language chips, reading-level selector | Generate packages |
-| Generation | Preserve trust during model work | Staged status and cancel/retry affordance | Wait, retry, or use fixture |
-| Review | Let the teacher make a pedagogical decision | Source reference, selected-language tab, editable package sections | Approve package |
-| Export | Deliver the tangible outcome | Approved print preview and success confirmation | Print / Save as PDF |
+Each concept node has one visible state: `grounded`, `needs-connection`, or `needs-evidence`. That state belongs to the simulated novice’s usable model of the topic. It is not a psychometric profile of a student.
 
-The review screen keeps the original lesson visible as a reference and shows only one language package in the main work area. Language tabs switch packages; they do not create competing, hard-to-compare columns.
+## Trust-by-design decisions
 
-## Inputs, output, and control
-
-### Inputs
-
-- **Source:** Pasted text or PDF with extractable text.
-- **Settings:** Target language selection (maximum three) and learner reading level.
-- **Privacy boundary:** The UI tells teachers not to upload student records or personally identifying information.
-
-Reject empty, oversized, password-protected, image-only, or unreadable PDFs. Preserve the typed/pasted text and provide an actionable recovery message.
-
-### Generated language package
-
-```ts
-type LanguagePackage = {
-  language: string;
-  translation: string;
-  simplifiedEnglish: string;
-  keyVocabulary: Array<{ term: string; definition: string }>;
-  comprehensionPrompts: string[];
-  sourceNotes: string[];
-  uncertaintyFlags: string[];
-};
-```
-
-The model must preserve instructional meaning, avoid invented facts, retain key questions or headings when possible, and surface ambiguity in `uncertaintyFlags` instead of guessing.
-
-### Teacher approval
-
-Every output begins as a **Draft**. Each section can be edited or regenerated individually. A package becomes **Approved** only after an explicit teacher action, which unlocks export. The export includes only approved content.
-
-Visible copy: **“AI draft — review before using with students.”**
-
-## AI and data design
-
-- Call the OpenAI Responses API from the server only; never expose the API key to the browser.
-- Use `gpt-5.6` with `reasoning.effort: "medium"` and `store: false`.
-- Use Structured Outputs to return the language-package contract above, rather than parsing arbitrary prose.
-- When a live request cannot run, offer a clearly labeled deterministic demo fixture. Do not silently substitute fixture content.
-- Do not persist source lessons, generated packages, or student information in v1.
-
-The Responses API is OpenAI’s recommended interface for new projects, and Structured Outputs provides schema adherence for predictable UI rendering. See [Responses API guidance](https://developers.openai.com/api/docs/guides/migrate-to-responses), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), and [GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model).
-
-## UX principles and design decisions
-
-| Principle | Design decision |
+| Risk | Product response |
 | --- | --- |
-| [Cognitive Load](https://lawsofux.com/cognitive-load/) | Show source, learner settings, and the next action at each stage; group each output with its controls; remove decorative distractions. |
-| [Hick’s Law](https://lawsofux.com/hicks-law/) | Default common settings, label recommendations, progressively reveal advanced controls, and cap language selection at three. |
-| [Jakob’s Law](https://lawsofux.com/jakobs-law/) | Use familiar upload, select, tab, text-editing, approval, and browser-print patterns. |
-| [Fitts’s Law](https://lawsofux.com/fittss-law/) | Make Generate, Approve, and Export large, well-spaced targets close to the relevant content. |
-| [Doherty Threshold](https://lawsofux.com/doherty-threshold/) | Acknowledge every interaction immediately; use meaningful generation stages and clear wait states for longer model calls. |
-| [Postel’s Law](https://lawsofux.com/postels-law/) | Accept pasted text or valid PDFs, normalize safely, validate at boundaries, and give specific recovery feedback. |
-| [Peak-End Rule](https://lawsofux.com/peak-end-rule/) | End the flow with a clean, teacher-approved handout and a succinct success message. |
+| A model invents evidence | Every setup quote must be an exact substring of the approved source packet. |
+| A model drifts into a different concept map | Turn updates may reference only existing, non-duplicate node IDs. |
+| A student begins before review | The API rejects a draft session; a teacher must approve the map first. |
+| A model becomes an answer machine | Prompts request a missing relationship or revision, not a full student response. |
+| A trace becomes a score | No score, grade, authorship, diagnosis, or integrity label exists in the domain model or UI. |
+| Sensitive classroom data is used casually | The product asks for de-identified material and has no account or database in this MVP. |
 
-## Visual and interaction system
+## Acceptance criteria
 
-- **Tone:** Calm, trustworthy, and classroom-ready; avoid a generic chatbot or dashboard aesthetic.
-- **Layout:** A responsive single-column form for setup; split reference/work area on large screens; stacked reference and output panels on small screens.
-- **Content grouping:** Use headings, labels, and subtle bounded regions to connect vocabulary, prompts, status, and controls to the output they govern.
-- **States:** Design explicit empty, ready, validating, generating, draft, edited, approved, success, and error states.
-- **Accessibility:** Semantic controls and labels, visible keyboard focus, live status announcements, readable contrast, sufficiently large targets, and print styles.
-
-## Design tokens
-
-```css
-:root {
-  --color-surface: #ffffff;
-  --color-surface-muted: #f4f7f8;
-  --color-text: #172033;
-  --color-text-muted: #596579;
-  --color-primary: #0f766e;
-  --color-primary-hover: #0b5d56;
-  --color-success: #167a45;
-  --color-warning: #a45300;
-  --color-danger: #b42318;
-  --color-focus: #2563eb;
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --radius-sm: 0.375rem;
-  --radius-md: 0.75rem;
-}
-```
-
-## Success evidence
-
-- A teacher completes the source-to-approved-handout path without manual recovery.
-- Every selected language has a complete, source-grounded, editable package.
-- The UI clearly distinguishes draft from approved material.
-- The deterministic demo completes without credentials or network access.
-
-## Risks and decisions
-
-| Risk or assumption | Decision or mitigation |
-| --- | --- |
-| Model output may be inaccurate or culturally inappropriate | Keep source visible, require teacher approval, allow section-level edits, and label output as a draft. |
-| Live API access may fail during judging | Provide a clearly labeled deterministic fixture fallback. |
-| Scanned PDFs do not expose text | Identify this specific limitation and ask for pasted text or a text-readable PDF. |
-| Multiple languages can make review noisy | Generate up to three but review one selected language package at a time. |
+- A judge can complete the Greenwater scenario without an API key.
+- A teacher can see the original source, three literal evidence anchors, a causal chain, uncertainty, and one misconception before approving.
+- A strong explanation visibly moves the session into transfer; a strong transfer produces a teacher-reviewable note.
+- A draft or completed session cannot be advanced via the API.
+- The page is understandable without an onboarding document: the labels explain what is simulated, what is live, and what requires human judgment.

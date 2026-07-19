@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Project Linguist",
-  description: "Teacher-reviewed multilingual learning packages.",
+  title: "TeachBack — Make learning visible",
+  description: "A teacher-controlled Misconception Twin for explanation, transfer, and learning evidence.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

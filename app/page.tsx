@@ -1,307 +1,326 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { SAMPLE_LESSON } from "@/lib/fixture";
-import { AVAILABLE_LANGUAGES, READING_LEVELS, type GenerationResponse, type LanguagePackage } from "@/lib/types";
+import { DEMO_SOURCE, DEMO_STRONG_EXPLANATION, DEMO_STRONG_TRANSFER } from "@/lib/fixture";
+import type { CreateSessionResponse, SessionMode, TeachBackSession } from "@/lib/types";
+import { activePrompt, activeStage, appStep, approveTeacherSummary, statusLabel, statusSummary } from "@/lib/workflow";
 
-type PackageState = "draft" | "edited" | "approved";
-type PackageKey = "translation" | "simplifiedEnglish" | "comprehensionPrompts";
+type BusyState = "idle" | "building" | "responding";
 
-const initialLanguages = ["Spanish", "Bahasa Indonesia"];
+const DEFAULT_PACKET = {
+  title: "Greenwater Lake field brief",
+  subject: "Grade 10 Environmental Science",
+  learningGoal: "Explain a causal mechanism with source evidence, while separating a supported explanation from a claim of proof.",
+  lessonText: DEMO_SOURCE,
+};
+
+const steps = ["Set the source", "Approve the twin", "Teach it", "Review evidence"];
 
 export default function Home() {
-  const [sourceText, setSourceText] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [languages, setLanguages] = useState<string[]>(initialLanguages);
-  const [readingLevel, setReadingLevel] = useState<(typeof READING_LEVELS)[number]>("Grade 5–6");
-  const [result, setResult] = useState<GenerationResponse | null>(null);
-  const [activeLanguage, setActiveLanguage] = useState("");
-  const [states, setStates] = useState<Record<string, PackageState>>({});
-  const [status, setStatus] = useState<"idle" | "generating" | "regenerating">("idle");
+  const [session, setSession] = useState<TeachBackSession | null>(null);
+  const [mode, setMode] = useState<SessionMode>("fixture");
+  const [teacherApproved, setTeacherApproved] = useState(false);
+  const [packet, setPacket] = useState(DEFAULT_PACKET);
+  const [response, setResponse] = useState("");
+  const [busy, setBusy] = useState<BusyState>("idle");
   const [error, setError] = useState("");
-  const [canUseFixture, setCanUseFixture] = useState(false);
 
-  const activePackage = useMemo(
-    () => result?.packages.find((item) => item.language === activeLanguage) ?? result?.packages[0] ?? null,
-    [activeLanguage, result]
-  );
+  const step = appStep(session, teacherApproved);
+  const currentPrompt = useMemo(() => (session ? activePrompt(session) : ""), [session]);
+  const currentStage = useMemo(() => (session ? activeStage(session) : "explanation"), [session]);
+  const currentStepIndex = step === "setup" ? 0 : step === "review" ? 1 : step === "teach" ? 2 : 3;
 
-  function changeLanguage(language: string) {
-    setLanguages((current) => {
-      if (current.includes(language)) return current.filter((item) => item !== language);
-      if (current.length === 3) return current;
-      return [...current, language];
+  async function requestTwin(body: unknown) {
+    const result = await fetch("/api/twin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
-  }
-
-  function loadDemo() {
-    setSourceText(SAMPLE_LESSON);
-    setFile(null);
-    setLanguages(initialLanguages);
-    setReadingLevel("Grade 5–6");
-    setError("");
-    setCanUseFixture(true);
-  }
-
-  function formData(mode: "live" | "fixture", targetLanguages = languages) {
-    const data = new FormData();
-    data.set("sourceText", sourceText);
-    data.set("languages", JSON.stringify(targetLanguages));
-    data.set("readingLevel", readingLevel);
-    data.set("mode", mode);
-    if (file) data.set("file", file);
-    return data;
-  }
-
-  async function generate(mode: "live" | "fixture") {
-    setStatus("generating");
-    setError("");
-    setCanUseFixture(false);
+    const raw = await result.text();
+    let payload: { error?: string } | null = null;
     try {
-      const response = await fetch("/api/generate", { method: "POST", body: formData(mode) });
-      const data = await response.json();
-      if (!response.ok) {
-        setError(data.error ?? "We could not create a package. Your lesson is still here.");
-        setCanUseFixture(data.code === "api_unavailable" || data.code === "generation_failed" || data.code === "invalid_output");
-        return;
-      }
-      const generated = data as GenerationResponse;
-      setResult(generated);
-      setActiveLanguage(generated.packages[0]?.language ?? "");
-      setStates(Object.fromEntries(generated.packages.map((item) => [item.language, "draft"])));
+      payload = JSON.parse(raw) as { error?: string };
     } catch {
-      setError("We could not reach the generator. Your lesson is still here—use the fixture demo to continue.");
-      setCanUseFixture(true);
+      throw new Error("TeachBack could not reach its session service. Please try again.");
+    }
+    if (!result.ok) throw new Error(payload.error ?? "TeachBack could not complete that step.");
+    return payload as CreateSessionResponse;
+  }
+
+  async function openDemo() {
+    setBusy("building");
+    setError("");
+    try {
+      const result = await requestTwin({ action: "create", mode: "fixture" });
+      setSession(result.session);
+      setMode("fixture");
+      setTeacherApproved(false);
+      setResponse("");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The demo could not open.");
     } finally {
-      setStatus("idle");
+      setBusy("idle");
     }
   }
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function buildLiveTwin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!sourceText.trim() && !file) {
-      setError("Add lesson text or choose a text-readable PDF.");
-      return;
-    }
-    if (!languages.length) {
-      setError("Select at least one target language.");
-      return;
-    }
-    await generate("live");
-  }
-
-  function updatePackage(language: string, update: (current: LanguagePackage) => LanguagePackage) {
-    setResult((current) =>
-      current
-        ? { ...current, packages: current.packages.map((item) => (item.language === language ? update(item) : item)) }
-        : current
-    );
-    setStates((current) => ({ ...current, [language]: "edited" }));
-  }
-
-  async function regenerateSection(key: PackageKey) {
-    if (!activePackage) return;
-    setStatus("regenerating");
+    setBusy("building");
     setError("");
     try {
-      const response = await fetch("/api/generate", { method: "POST", body: formData("live", [activePackage.language]) });
-      const data = await response.json();
-      if (!response.ok) {
-        setError(data.error ?? "That section could not be regenerated. Your edits are unchanged.");
-        setCanUseFixture(true);
-        return;
-      }
-      const replacement = (data as GenerationResponse).packages[0];
-      updatePackage(activePackage.language, (current) => ({ ...current, [key]: replacement[key] }));
-    } catch {
-      setError("That section could not be regenerated. Your edits are unchanged.");
-      setCanUseFixture(true);
+      const result = await requestTwin({ action: "create", mode: "live", ...packet });
+      setSession(result.session);
+      setMode("live");
+      setTeacherApproved(false);
+      setResponse("");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The twin could not be built.");
     } finally {
-      setStatus("idle");
+      setBusy("idle");
     }
   }
 
-  function approve(language: string) {
-    setStates((current) => ({ ...current, [language]: "approved" }));
+  function approveTwin() {
+    setTeacherApproved(true);
+    setSession((current) => (current ? { ...current, status: "approved" } : current));
+    setError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  const activeState = activePackage ? states[activePackage.language] ?? "draft" : "draft";
+  async function sendExplanation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) return;
+    setBusy("responding");
+    setError("");
+    try {
+      const result = await requestTwin({ action: "advance", mode, session, response });
+      setSession(result.session);
+      setResponse("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The twin could not respond.");
+    } finally {
+      setBusy("idle");
+    }
+  }
+
+  function loadWorkedResponse() {
+    setResponse(currentStage === "transfer" ? DEMO_STRONG_TRANSFER : DEMO_STRONG_EXPLANATION);
+  }
+
+  function restart() {
+    setSession(null);
+    setMode("fixture");
+    setTeacherApproved(false);
+    setResponse("");
+    setError("");
+  }
 
   return (
-    <main className="app-shell">
+    <main className="site-shell">
       <header className="masthead">
-        <a className="brand" href="#start" aria-label="Project Linguist home">
-          <span className="brand-mark">L</span>
-          <span>Project Linguist</span>
+        <a className="brand" href="#top" aria-label="TeachBack home">
+          <span className="brand-orbit" aria-hidden="true"><span /></span>
+          <span>TeachBack</span>
         </a>
-        <p>Teacher-reviewed multilingual learning access</p>
+        <div className="masthead-meta">
+          <span className="privacy-dot" aria-hidden="true" /> No accounts · No grades · Teacher approved
+        </div>
       </header>
 
-      <section className="hero" id="start">
-        <div>
-          <p className="eyebrow">ONE LESSON. MORE LEARNERS INCLUDED.</p>
-          <h1>Make tomorrow&apos;s lesson understandable today.</h1>
-          <p className="lede">Turn a lesson into clear, reviewable language packages—without replacing your professional judgment.</p>
-        </div>
-        <button className="text-button" type="button" onClick={loadDemo}>
-          Load sample lesson
-        </button>
-      </section>
+      <nav className="progress" aria-label="TeachBack progress">
+        <ol>
+          {steps.map((label, index) => (
+            <li className={index === currentStepIndex ? "active" : index < currentStepIndex ? "done" : ""} key={label}>
+              <span>{index < currentStepIndex ? "✓" : index + 1}</span>{label}
+            </li>
+          ))}
+        </ol>
+      </nav>
 
-      <form className="setup-card" onSubmit={onSubmit}>
-        <div className="section-heading">
-          <div>
-            <p className="step">STEP 1</p>
-            <h2>Add the lesson</h2>
-          </div>
-          <p className="privacy">Use classroom materials only. Do not upload student records or personal information.</p>
-        </div>
-
-        <label htmlFor="source">Paste lesson text</label>
-        <textarea
-          id="source"
-          value={sourceText}
-          onChange={(event) => setSourceText(event.target.value)}
-          placeholder="Paste a passage, worksheet, or chapter summary…"
-          rows={10}
-        />
-
-        <div className="or"><span>or</span></div>
-        <label className="file-input" htmlFor="file">
-          <span>Upload a text-readable PDF</span>
-          <small>{file ? file.name : "Scanned and image-only PDFs are not supported in this MVP."}</small>
-          <input id="file" type="file" accept="application/pdf,.pdf" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-        </label>
-
-        <div className="settings-grid">
-          <fieldset>
-            <legend>Target languages <span>(choose up to 3)</span></legend>
-            <div className="choice-grid">
-              {AVAILABLE_LANGUAGES.map((language) => {
-                const checked = languages.includes(language);
-                const disabled = !checked && languages.length === 3;
-                return (
-                  <label className={`choice ${checked ? "selected" : ""}`} key={language}>
-                    <input type="checkbox" checked={checked} disabled={disabled} onChange={() => changeLanguage(language)} />
-                    {language}
-                  </label>
-                );
-              })}
+      {!session ? (
+        <>
+          <section className="hero" id="top">
+            <div className="hero-copy">
+              <p className="eyebrow">Learning evidence, not surveillance</p>
+              <h1>Give every student a learner they must teach.</h1>
+              <p className="lede">TeachBack simulates a novice with one calibrated misconception. When the novice tries a new case, the student’s reasoning—and any missing link—becomes visible.</p>
+              <div className="hero-actions">
+                <button className="button primary" type="button" onClick={openDemo} disabled={busy !== "idle"}>
+                  {busy === "building" ? "Opening demo…" : "Open the worked demo"}
+                </button>
+                <a className="button ghost" href="#build">Build from a source packet</a>
+              </div>
+              <p className="hero-footnote">A constructive alternative to AI detection: explanation, transfer, and teacher judgment.</p>
             </div>
-          </fieldset>
-          <label className="select-label" htmlFor="level">
-            Reading level
-            <select id="level" value={readingLevel} onChange={(event) => setReadingLevel(event.target.value as typeof readingLevel)}>
-              {READING_LEVELS.map((level) => <option key={level}>{level}</option>)}
-            </select>
-          </label>
-        </div>
-
-        <div className="action-row">
-          <div aria-live="polite" className="status-message">
-            {status === "generating" ? "Preparing lesson, creating language packages, and checking the output…" : "AI draft — review before using with students."}
-          </div>
-          <button className="primary-button" type="submit" disabled={status !== "idle"}>
-            {status === "generating" ? "Creating packages…" : "Generate packages"}
-          </button>
-        </div>
-        {error && (
-          <div className="alert" role="alert">
-            <p>{error}</p>
-            {canUseFixture && <button type="button" onClick={() => generate("fixture")}>Use fixture demo</button>}
-          </div>
-        )}
-      </form>
-
-      {result && activePackage && (
-        <section className="review" aria-labelledby="review-heading">
-          <div className="review-heading">
-            <div>
-              <p className="step">STEP 2</p>
-              <h2 id="review-heading">Review the learning package</h2>
-              <p>{result.mode === "fixture" ? "Fixture demo — deterministic sample output" : "Live AI draft — teacher review required"}</p>
-            </div>
-            <span className={`state-pill ${activeState}`}>{activeState}</span>
-          </div>
-          <div className="review-layout">
-            <aside className="source-panel">
-              <p className="panel-kicker">SOURCE LESSON</p>
-              <pre>{result.sourceText}</pre>
+            <aside className="hero-simulation" aria-label="TeachBack simulation preview">
+              <div className="simulation-topline"><span className="live-dot" /> SIMULATED LEARNING STATE</div>
+              <div className="simulation-quote">“If algae make oxygen, why did the greener lake have less oxygen at dawn?”</div>
+              <div className="simulation-chain">
+                <span>Nutrients</span><b>→</b><span>Algal bloom</span><b>→</b><span className="alert-node">Decomposition</span><b>→</b><span>Low O₂</span>
+              </div>
+              <div className="simulation-answer"><strong>Student teaches:</strong> “The critical change is what happens after the bloom dies…”</div>
+              <div className="simulation-status"><span>✓ mechanism visible</span><span>→ transfer next</span></div>
             </aside>
-            <section className="package-panel">
-              <div className="tabs" role="tablist" aria-label="Language packages">
-                {result.packages.map((item) => (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activePackage.language === item.language}
-                    className={activePackage.language === item.language ? "active" : ""}
-                    key={item.language}
-                    onClick={() => setActiveLanguage(item.language)}
-                  >
-                    {item.language}
-                  </button>
-                ))}
-              </div>
+          </section>
 
-              <EditableSection
-                title="Translation"
-                value={activePackage.translation}
-                onChange={(value) => updatePackage(activePackage.language, (item) => ({ ...item, translation: value }))}
-                onRegenerate={() => regenerateSection("translation")}
-                busy={status === "regenerating"}
-              />
-              <EditableSection
-                title={`Simplified English · ${readingLevel}`}
-                value={activePackage.simplifiedEnglish}
-                onChange={(value) => updatePackage(activePackage.language, (item) => ({ ...item, simplifiedEnglish: value }))}
-                onRegenerate={() => regenerateSection("simplifiedEnglish")}
-                busy={status === "regenerating"}
-              />
-              <section className="content-section">
-                <h3>Key vocabulary</h3>
-                <dl className="vocabulary">
-                  {activePackage.keyVocabulary.map((item, index) => (
-                    <div key={`${item.term}-${index}`}>
-                      <dt>{item.term}</dt><dd>{item.definition}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-              <section className="content-section">
-                <div className="section-title-row"><h3>Comprehension prompts</h3><button type="button" className="text-button small" onClick={() => regenerateSection("comprehensionPrompts")} disabled={status !== "idle"}>Regenerate</button></div>
-                <ol>
-                  {activePackage.comprehensionPrompts.map((prompt, index) => (
-                    <li key={index}><input aria-label={`Comprehension prompt ${index + 1}`} value={prompt} onChange={(event) => updatePackage(activePackage.language, (item) => ({ ...item, comprehensionPrompts: item.comprehensionPrompts.map((value, promptIndex) => promptIndex === index ? event.target.value : value) }))} /></li>
-                  ))}
-                </ol>
-              </section>
-              {!!activePackage.uncertaintyFlags.length && <section className="uncertainty"><h3>Review notes</h3><ul>{activePackage.uncertaintyFlags.map((note) => <li key={note}>{note}</li>)}</ul></section>}
+          <section className="principles" aria-label="How TeachBack works">
+            <article><span>01</span><h2>Ground it</h2><p>The teacher’s source packet becomes a reviewable concept map—not a free-form chatbot prompt.</p></article>
+            <article><span>02</span><h2>Teach it</h2><p>The student repairs one plausible novice misconception with explanation and evidence.</p></article>
+            <article><span>03</span><h2>Transfer it</h2><p>The twin tries a new case. The teacher reviews what the learner actually made visible.</p></article>
+          </section>
 
-              <div className="approval-row">
-                <div><strong>{activeState === "approved" ? "Approved for export" : "Review complete?"}</strong><span>{activeState === "approved" ? "Editing this package will require approval again." : "Approval confirms you reviewed this draft."}</span></div>
-                <button className="primary-button" type="button" onClick={() => approve(activePackage.language)} disabled={activeState === "approved"}>{activeState === "approved" ? "Approved" : "Approve package"}</button>
+          <section className="builder" id="build" aria-labelledby="builder-title">
+            <div className="builder-intro">
+              <p className="eyebrow">Teacher setup</p>
+              <h2 id="builder-title">Build a twin from an approved source packet.</h2>
+              <p>Use only de-identified classroom material. TeachBack does not save the packet or create a grade.</p>
+              <div className="guardrail-callout"><strong>Before you continue</strong><span>The teacher reviews the source map and misconception before any student interaction begins.</span></div>
+            </div>
+            <form className="builder-form" onSubmit={buildLiveTwin}>
+              <div className="field-row">
+                <label>Packet title<input value={packet.title} onChange={(event) => setPacket((current) => ({ ...current, title: event.target.value }))} /></label>
+                <label>Subject / context<input value={packet.subject} onChange={(event) => setPacket((current) => ({ ...current, subject: event.target.value }))} /></label>
               </div>
-            </section>
-          </div>
-        </section>
+              <label>One learning goal<textarea rows={3} value={packet.learningGoal} onChange={(event) => setPacket((current) => ({ ...current, learningGoal: event.target.value }))} /></label>
+              <label>Teacher-approved source packet<textarea rows={10} value={packet.lessonText} onChange={(event) => setPacket((current) => ({ ...current, lessonText: event.target.value }))} /></label>
+              <div className="form-footer">
+                <button className="button primary" type="submit" disabled={busy !== "idle"}>{busy === "building" ? "Building twin…" : "Build source map with GPT‑5.6"}</button>
+                <button className="button text" type="button" onClick={() => setPacket(DEFAULT_PACKET)}>Restore Greenwater packet</button>
+              </div>
+            </form>
+          </section>
+        </>
+      ) : (
+        <>
+          <section className="session-header" id="top">
+            <div>
+              <p className="eyebrow">{mode === "fixture" ? "Deterministic worked demo" : "Teacher source packet"}</p>
+              <h1>{session.sourceMap.title}</h1>
+              <p>{session.sourceMap.subject} · {session.sourceMap.learningGoal}</p>
+            </div>
+            <div className={`mode-badge ${mode}`}><span />{mode === "fixture" ? "OFFLINE FIXTURE" : "GPT‑5.6 LIVE"}</div>
+          </section>
+
+          {step === "review" && <SourceReview session={session} onApprove={approveTwin} onRestart={restart} />}
+          {step === "teach" && (
+            <TeachStage
+              session={session}
+              prompt={currentPrompt}
+              stage={currentStage}
+              response={response}
+              onResponse={setResponse}
+              onSubmit={sendExplanation}
+              onUseWorkedResponse={mode === "fixture" ? loadWorkedResponse : undefined}
+              busy={busy === "responding"}
+            />
+          )}
+          {step === "summary" && <TeacherReview session={session} onUpdate={setSession} onRestart={restart} />}
+        </>
       )}
 
-      {result && activePackage && activeState === "approved" && (
-        <section className="export-card">
-          <div><p className="step">STEP 3</p><h2>Ready for students</h2><p>Print the approved {activePackage.language} package or save it as a PDF.</p></div>
-          <button className="primary-button" type="button" onClick={() => window.print()}>Print / save as PDF</button>
-        </section>
-      )}
+      {error && <div className="toast-error" role="alert"><strong>That step did not complete.</strong><span>{error}</span></div>}
     </main>
   );
 }
 
-function EditableSection({ title, value, onChange, onRegenerate, busy }: { title: string; value: string; onChange: (value: string) => void; onRegenerate: () => void; busy: boolean }) {
+function SourceReview({ session, onApprove, onRestart }: { session: TeachBackSession; onApprove: () => void; onRestart: () => void }) {
   return (
-    <section className="content-section">
-      <div className="section-title-row"><h3>{title}</h3><button type="button" className="text-button small" onClick={onRegenerate} disabled={busy}>Regenerate</button></div>
-      <textarea aria-label={title} value={value} onChange={(event) => onChange(event.target.value)} rows={5} />
+    <section className="review-stage" aria-labelledby="review-title">
+      <div className="stage-title">
+        <div><p className="eyebrow">Teacher gate · step 2</p><h2 id="review-title">Review what the twin is allowed to teach.</h2></div>
+        <p>Nothing is released to a student until you approve this map.</p>
+      </div>
+      <div className="review-grid">
+        <section className="source-card">
+          <div className="card-heading"><span>01</span><div><p>Approved source</p><h3>Evidence anchors</h3></div></div>
+          <div className="anchor-list">
+            {session.sourceMap.evidenceAnchors.map((anchor) => <blockquote key={anchor.label}><strong>{anchor.label}</strong><p>“{anchor.quote}”</p></blockquote>)}
+          </div>
+          <details><summary>Read full source packet</summary><pre>{session.sourceText}</pre></details>
+        </section>
+        <section className="map-card">
+          <div className="card-heading"><span>02</span><div><p>Source-grounded map</p><h3>Concept relationships</h3></div></div>
+          <ol className="causal-chain">
+            {session.sourceMap.causalChain.map((item, index) => <li key={item}><span>{index + 1}</span><p>{item}</p></li>)}
+          </ol>
+          <div className="uncertainty"><strong>Boundary</strong>{session.sourceMap.uncertainty.map((item) => <p key={item}>{item}</p>)}</div>
+        </section>
+        <section className="twin-card">
+          <div className="card-heading"><span>03</span><div><p>Simulated novice</p><h3>Nova’s starting misconception</h3></div></div>
+          <p className="misconception">{session.twin.misconception}</p>
+          <p className="twin-disclosure">Nova is a structured simulation of a novice state. It does not know, remember, or judge the student.</p>
+          <div className="twin-preview"><span>NOVA ASKS</span><p>{session.twin.openingPrompt}</p></div>
+        </section>
+      </div>
+      <div className="approval-bar"><div><strong>Ready to let a student teach this twin?</strong><span>Approval confirms that the source, learning goal, and misconception are appropriate for this activity.</span></div><div><button className="button ghost" type="button" onClick={onRestart}>Start over</button><button className="button primary" type="button" onClick={onApprove}>Approve &amp; begin</button></div></div>
+    </section>
+  );
+}
+
+function TeachStage({ session, prompt, stage, response, onResponse, onSubmit, onUseWorkedResponse, busy }: {
+  session: TeachBackSession;
+  prompt: string;
+  stage: "explanation" | "transfer" | "complete";
+  response: string;
+  onResponse: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onUseWorkedResponse?: () => void;
+  busy: boolean;
+}) {
+  const isTransfer = stage === "transfer";
+  return (
+    <section className="teach-stage" aria-labelledby="teach-title">
+      <div className="stage-title"><div><p className="eyebrow">Student experience · step 3</p><h2 id="teach-title">Teach Nova your reasoning.</h2></div><p>{isTransfer ? "Transfer the idea to a new case—without reaching beyond the evidence." : "Explain the relationship, then show Nova where the evidence stops."}</p></div>
+      <div className="teach-grid">
+        <section className="dialogue-card" aria-label="TeachBack conversation">
+          <div className="dialogue-top"><div className="nova-avatar">N</div><div><strong>Nova</strong><span>Simulated novice · asks, does not grade</span></div><span className="stage-chip">{isTransfer ? "TRANSFER" : "TEACH-BACK"}</span></div>
+          <div className="conversation">
+            {session.turns.map((turn, index) => (
+              <div className="turn-pair" key={`${turn.stage}-${index}`}>
+                <div className="bubble student"><span>You taught</span><p>{turn.response}</p></div>
+                <div className="bubble nova"><span>Nova updated</span><p>{turn.twinReply}</p></div>
+                <div className="coach-line"><strong>Coach note</strong>{turn.coachNote}</div>
+              </div>
+            ))}
+            <div className="bubble nova current"><span>Nova asks now</span><p>{prompt}</p></div>
+          </div>
+          <form className="response-form" onSubmit={onSubmit}>
+            <label htmlFor="teach-response">Your explanation</label>
+            <textarea id="teach-response" value={response} onChange={(event) => onResponse(event.target.value)} rows={5} placeholder={isTransfer ? "State what the new observation may suggest, then what cannot be concluded yet…" : "Teach Nova the causal chain in your own words. Use the source packet…"} />
+            <div className="response-actions"><span>{isTransfer ? "Aim for a careful conclusion, not a guess." : "Name the mechanism and the limit of the evidence."}</span><div>{onUseWorkedResponse && <button className="button text" type="button" onClick={onUseWorkedResponse}>Use worked demo reply</button>}<button className="button primary" type="submit" disabled={busy}>{busy ? "Nova is updating…" : isTransfer ? "Try the new case" : "Teach Nova"}</button></div></div>
+          </form>
+        </section>
+        <aside className="state-card" aria-label="Simulated learning state">
+          <div className="state-heading"><div><p>SIMULATED LEARNING STATE</p><h3>What Nova can now use</h3></div><span>{statusSummary(session)}</span></div>
+          <ul className="concept-state">
+            {session.sourceMap.conceptNodes.map((node) => <li className={node.status} key={node.id}><span className="node-icon">{node.status === "grounded" ? "✓" : node.status === "needs-connection" ? "↗" : "?"}</span><div><strong>{node.label}</strong><p>{node.explanation}</p><small>{statusLabel(node.status)} · {node.sourceAnchor}</small></div></li>)}
+          </ul>
+          <div className="state-disclosure"><strong>Why this is visible</strong><p>The map is a transparent simulation state, not an estimate of a student’s intelligence or authorship.</p></div>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function TeacherReview({ session, onUpdate, onRestart }: { session: TeachBackSession; onUpdate: (session: TeachBackSession) => void; onRestart: () => void }) {
+  const approved = session.status === "teacher-approved";
+  const summary = session.summary;
+  return (
+    <section className="summary-stage" aria-labelledby="summary-title">
+      <div className="stage-title"><div><p className="eyebrow">Teacher review · step 4</p><h2 id="summary-title">A learning trace—not a verdict.</h2></div><p>Use the evidence for the next instructional conversation. Do not treat it as an automated grade or an integrity finding.</p></div>
+      <div className="summary-hero">
+        <div className="summary-mark">✓</div>
+        <div><p className="eyebrow">Transfer complete</p><h3>{summary?.headline ?? "The student completed the transfer check."}</h3><p>{summary?.teacherNote}</p></div>
+        <span className={approved ? "approval-state done" : "approval-state"}>{approved ? "TEACHER REVIEWED" : "AWAITING REVIEW"}</span>
+      </div>
+      <div className="summary-grid">
+        <section className="evidence-summary"><h3>Evidence made visible</h3><ul>{summary?.demonstrated.map((item) => <li key={item}><span>✓</span>{item}</li>)}</ul></section>
+        <section className="next-step"><p>Suggested next step</p><h3>{summary?.nextStep}</h3><span>This is a draft for teacher judgment, not a prescribed intervention.</span></section>
+      </div>
+      <section className="trace-card"><div><p>Conversation trace</p><h3>What the student taught; what Nova could then transfer.</h3></div><ol>{session.turns.map((turn, index) => <li key={`${turn.stage}-${index}`}><span>{index + 1}</span><div><strong>{turn.stage === "explanation" ? "Teach-back" : "Transfer"}</strong><p>{turn.response}</p><small>{turn.coachNote}</small></div></li>)}</ol></section>
+      <div className="approval-bar"><div><strong>{approved ? "Teacher review recorded locally" : "Review this learning trace before using it."}</strong><span>{approved ? "Nothing has been saved to an account in this MVP." : "Approval is the final human gate; it does not change a grade."}</span></div><div><button className="button ghost" type="button" onClick={onRestart}>New session</button>{!approved && <button className="button primary" type="button" onClick={() => onUpdate(approveTeacherSummary(session))}>Approve learning note</button>}{approved && <button className="button primary" type="button" onClick={() => window.print()}>Print learning note</button>}</div></div>
     </section>
   );
 }
