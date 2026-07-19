@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import Image from "next/image";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { DEMO_SOURCE, DEMO_STRONG_EXPLANATION, DEMO_STRONG_TRANSFER } from "@/lib/fixture";
 import type { CreateSessionResponse, SessionMode, TeachBackSession } from "@/lib/types";
 import { activePrompt, activeStage, appStep, approveTeacherSummary, statusLabel, statusSummary } from "@/lib/workflow";
@@ -16,8 +17,23 @@ const DEFAULT_PACKET = {
 
 const steps = ["Set the source", "Approve the twin", "Teach it", "Review evidence"];
 
+function BrandLockup() {
+  return (
+    <span className="brand-lockup">
+      <span className="brand-grid" aria-hidden="true"><i /><i /><i /><i /></span>
+      <span className="brand-name">TeachBack</span>
+    </span>
+  );
+}
+
+function scrollToTop() {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+}
+
 export default function Home() {
   const [session, setSession] = useState<TeachBackSession | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [mode, setMode] = useState<SessionMode>("fixture");
   const [teacherApproved, setTeacherApproved] = useState(false);
   const [packet, setPacket] = useState(DEFAULT_PACKET);
@@ -25,10 +41,18 @@ export default function Home() {
   const [busy, setBusy] = useState<BusyState>("idle");
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, [theme]);
+
   const step = appStep(session, teacherApproved);
   const currentPrompt = useMemo(() => (session ? activePrompt(session) : ""), [session]);
   const currentStage = useMemo(() => (session ? activeStage(session) : "explanation"), [session]);
   const currentStepIndex = step === "setup" ? 0 : step === "review" ? 1 : step === "teach" ? 2 : 3;
+  const liveStatus = busy === "building" ? "Preparing a TeachBack session." : busy === "responding" ? "Nova is updating the learning trace." : "";
 
   async function requestTwin(body: unknown) {
     const result = await fetch("/api/twin", {
@@ -37,7 +61,7 @@ export default function Home() {
       body: JSON.stringify(body),
     });
     const raw = await result.text();
-    let payload: { error?: string } | null = null;
+    let payload: { error?: string };
     try {
       payload = JSON.parse(raw) as { error?: string };
     } catch {
@@ -56,7 +80,7 @@ export default function Home() {
       setMode("fixture");
       setTeacherApproved(false);
       setResponse("");
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      scrollToTop();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The demo could not open.");
     } finally {
@@ -74,7 +98,7 @@ export default function Home() {
       setMode("live");
       setTeacherApproved(false);
       setResponse("");
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      scrollToTop();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The twin could not be built.");
     } finally {
@@ -86,7 +110,7 @@ export default function Home() {
     setTeacherApproved(true);
     setSession((current) => (current ? { ...current, status: "approved" } : current));
     setError("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollToTop();
   }
 
   async function sendExplanation(event: FormEvent<HTMLFormElement>) {
@@ -98,6 +122,7 @@ export default function Home() {
       const result = await requestTwin({ action: "advance", mode, session, response });
       setSession(result.session);
       setResponse("");
+      scrollToTop();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The twin could not respond.");
     } finally {
@@ -115,17 +140,21 @@ export default function Home() {
     setTeacherApproved(false);
     setResponse("");
     setError("");
+    scrollToTop();
   }
 
   return (
-    <main className="site-shell">
+    <main className="site-shell" data-theme={theme}>
+      <span className="screen-reader-status" aria-live="polite">{liveStatus}</span>
       <header className="masthead">
-        <a className="brand" href="#top" aria-label="TeachBack home">
-          <span className="brand-orbit" aria-hidden="true"><span /></span>
-          <span>TeachBack</span>
-        </a>
-        <div className="masthead-meta">
-          <span className="privacy-dot" aria-hidden="true" /> No accounts · No grades · Teacher approved
+        {session ? (
+          <button className="brand brand-button" type="button" onClick={restart} aria-label="Start a new TeachBack lesson"><BrandLockup /></button>
+        ) : (
+          <a className="brand" href="#top" aria-label="TeachBack home"><BrandLockup /></a>
+        )}
+        <div className="masthead-actions">
+          <p className="masthead-meta"><span>No accounts</span><span>No grades</span><span>Teacher approved</span></p>
+          <button className="theme-toggle" type="button" onClick={() => setTheme((current) => current === "light" ? "dark" : "light")} aria-label={theme === "light" ? "Use dark theme" : "Use light theme"}>{theme === "light" ? "Dark theme" : "Light theme"}</button>
         </div>
       </header>
 
@@ -133,74 +162,34 @@ export default function Home() {
         <ol>
           {steps.map((label, index) => (
             <li className={index === currentStepIndex ? "active" : index < currentStepIndex ? "done" : ""} key={label}>
-              <span>{index < currentStepIndex ? "✓" : index + 1}</span>{label}
+              <span className="progress-number">{index < currentStepIndex ? "Done" : index + 1}</span>
+              <span>{label}</span>
             </li>
           ))}
         </ol>
       </nav>
+      <div className="mobile-progress" role="status" aria-label={`Stage ${currentStepIndex + 1} of ${steps.length}: ${steps[currentStepIndex]}`}>
+        <span>{currentStepIndex + 1} / {steps.length}</span><strong>{steps[currentStepIndex]}</strong>
+      </div>
 
       {!session ? (
-        <>
-          <section className="hero" id="top">
-            <div className="hero-copy">
-              <p className="eyebrow">Learning evidence, not surveillance</p>
-              <h1>Give every student a learner they must teach.</h1>
-              <p className="lede">TeachBack simulates a novice with one calibrated misconception. When the novice tries a new case, the student’s reasoning—and any missing link—becomes visible.</p>
-              <div className="hero-actions">
-                <button className="button primary" type="button" onClick={openDemo} disabled={busy !== "idle"}>
-                  {busy === "building" ? "Opening demo…" : "Open the worked demo"}
-                </button>
-                <a className="button ghost" href="#build">Build from a source packet</a>
-              </div>
-              <p className="hero-footnote">A constructive alternative to AI detection: explanation, transfer, and teacher judgment.</p>
-            </div>
-            <aside className="hero-simulation" aria-label="TeachBack simulation preview">
-              <div className="simulation-topline"><span className="live-dot" /> SIMULATED LEARNING STATE</div>
-              <div className="simulation-quote">“If algae make oxygen, why did the greener lake have less oxygen at dawn?”</div>
-              <div className="simulation-chain">
-                <span>Nutrients</span><b>→</b><span>Algal bloom</span><b>→</b><span className="alert-node">Decomposition</span><b>→</b><span>Low O₂</span>
-              </div>
-              <div className="simulation-answer"><strong>Student teaches:</strong> “The critical change is what happens after the bloom dies…”</div>
-              <div className="simulation-status"><span>✓ mechanism visible</span><span>→ transfer next</span></div>
-            </aside>
-          </section>
-
-          <section className="principles" aria-label="How TeachBack works">
-            <article><span>01</span><h2>Ground it</h2><p>The teacher’s source packet becomes a reviewable concept map—not a free-form chatbot prompt.</p></article>
-            <article><span>02</span><h2>Teach it</h2><p>The student repairs one plausible novice misconception with explanation and evidence.</p></article>
-            <article><span>03</span><h2>Transfer it</h2><p>The twin tries a new case. The teacher reviews what the learner actually made visible.</p></article>
-          </section>
-
-          <section className="builder" id="build" aria-labelledby="builder-title">
-            <div className="builder-intro">
-              <p className="eyebrow">Teacher setup</p>
-              <h2 id="builder-title">Build a twin from an approved source packet.</h2>
-              <p>Use only de-identified classroom material. TeachBack does not save the packet or create a grade.</p>
-              <div className="guardrail-callout"><strong>Before you continue</strong><span>The teacher reviews the source map and misconception before any student interaction begins.</span></div>
-            </div>
-            <form className="builder-form" onSubmit={buildLiveTwin}>
-              <div className="field-row">
-                <label>Packet title<input value={packet.title} onChange={(event) => setPacket((current) => ({ ...current, title: event.target.value }))} /></label>
-                <label>Subject / context<input value={packet.subject} onChange={(event) => setPacket((current) => ({ ...current, subject: event.target.value }))} /></label>
-              </div>
-              <label>One learning goal<textarea rows={3} value={packet.learningGoal} onChange={(event) => setPacket((current) => ({ ...current, learningGoal: event.target.value }))} /></label>
-              <label>Teacher-approved source packet<textarea rows={10} value={packet.lessonText} onChange={(event) => setPacket((current) => ({ ...current, lessonText: event.target.value }))} /></label>
-              <div className="form-footer">
-                <button className="button primary" type="submit" disabled={busy !== "idle"}>{busy === "building" ? "Building twin…" : "Build source map with GPT‑5.6"}</button>
-                <button className="button text" type="button" onClick={() => setPacket(DEFAULT_PACKET)}>Restore Greenwater packet</button>
-              </div>
-            </form>
-          </section>
-        </>
+        <Landing
+          packet={packet}
+          busy={busy}
+          onOpenDemo={openDemo}
+          onBuildLiveTwin={buildLiveTwin}
+          onPacketChange={setPacket}
+          onRestorePacket={() => setPacket(DEFAULT_PACKET)}
+        />
       ) : (
         <>
           <section className="session-header" id="top">
             <div>
-              <p className="eyebrow">{mode === "fixture" ? "Deterministic worked demo" : "Teacher source packet"}</p>
+              <p className="session-context">{mode === "fixture" ? "Worked Greenwater lesson" : "Teacher source packet"}</p>
               <h1>{session.sourceMap.title}</h1>
-              <p>{session.sourceMap.subject} · {session.sourceMap.learningGoal}</p>
+              <p>{session.sourceMap.subject} / {session.sourceMap.learningGoal}</p>
             </div>
-            <div className={`mode-badge ${mode}`}><span />{mode === "fixture" ? "OFFLINE FIXTURE" : "GPT‑5.6 LIVE"}</div>
+            <div className={`mode-badge ${mode}`}><span>{mode === "fixture" ? "Fixture" : "Live"}</span>{mode === "fixture" ? "Offline demo" : "GPT-5.6"}</div>
           </section>
 
           {step === "review" && <SourceReview session={session} onApprove={approveTwin} onRestart={restart} />}
@@ -225,36 +214,112 @@ export default function Home() {
   );
 }
 
+function Landing({ packet, busy, onOpenDemo, onBuildLiveTwin, onPacketChange, onRestorePacket }: {
+  packet: typeof DEFAULT_PACKET;
+  busy: BusyState;
+  onOpenDemo: () => void;
+  onBuildLiveTwin: (event: FormEvent<HTMLFormElement>) => void;
+  onPacketChange: (packet: typeof DEFAULT_PACKET | ((current: typeof DEFAULT_PACKET) => typeof DEFAULT_PACKET)) => void;
+  onRestorePacket: () => void;
+}) {
+  return (
+    <>
+      <section className="landing-hero" id="top">
+        <div className="hero-copy">
+          <p className="hero-kicker">Learning evidence, not surveillance.</p>
+          <h1>Teach what you know.</h1>
+          <p className="hero-lede">A teacher-approved twin makes reasoning visible through explanation and transfer.</p>
+          <div className="hero-actions">
+            <button className="button primary" type="button" onClick={onOpenDemo} disabled={busy !== "idle"} aria-busy={busy === "building"}>
+              {busy === "building" ? "Opening lesson..." : "Preview the lesson"}
+            </button>
+            <a className="button ghost" href="#build">Teacher setup</a>
+          </div>
+        </div>
+        <figure className="hero-photo">
+          <Image src="/images/teachback-collaboration.jpg" alt="Three learners discussing their work around a table." width={1800} height={1200} priority sizes="(max-width: 900px) 100vw, 55vw" />
+        </figure>
+      </section>
+
+      <section className="evidence-section" aria-labelledby="evidence-title">
+        <div className="evidence-intro">
+          <p className="section-kicker">A source sets the boundary.</p>
+          <h2 id="evidence-title">Make the thinking visible, then test whether it travels.</h2>
+        </div>
+        <div className="evidence-layout">
+          <figure className="evidence-photo">
+            <Image src="/images/teachback-review.jpg" alt="Hands writing and reviewing notes in an open notebook." width={1400} height={933} sizes="(max-width: 900px) 100vw, 42vw" />
+          </figure>
+          <ol className="reasoning-list">
+            <li><strong>Start with what the teacher approves.</strong><span>The source packet becomes a visible concept map and a bounded misconception.</span></li>
+            <li><strong>Let the student repair one idea.</strong><span>Nova asks for the causal link and the limit of the evidence, not a polished answer.</span></li>
+            <li><strong>Try a new case.</strong><span>Transfer shows whether the explanation still holds when the details change.</span></li>
+          </ol>
+          <div className="evidence-signal" aria-label="TeachBack learning sequence">
+            <span>Source</span><b>creates</b><span>Explanation</span><b>tests</b><span>Transfer</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="builder" id="build" aria-labelledby="builder-title">
+        <div className="builder-intro">
+          <h2 id="builder-title">Start from the lesson you already teach.</h2>
+          <p>Build a reviewable twin from a short, de-identified packet. The teacher approves every source anchor before a student begins.</p>
+          <dl className="builder-promises">
+            <div><dt>Source grounded</dt><dd>Evidence quotes must appear in the teacher packet.</dd></div>
+            <div><dt>Human judgment</dt><dd>No grade, authorship claim, or automated verdict.</dd></div>
+          </dl>
+        </div>
+        <form className="builder-form" onSubmit={onBuildLiveTwin}>
+          <div className="field-row">
+            <label>Packet title<input value={packet.title} onChange={(event) => onPacketChange((current) => ({ ...current, title: event.target.value }))} /></label>
+            <label>Subject or context<input value={packet.subject} onChange={(event) => onPacketChange((current) => ({ ...current, subject: event.target.value }))} /></label>
+          </div>
+          <label>One learning goal<textarea rows={3} value={packet.learningGoal} onChange={(event) => onPacketChange((current) => ({ ...current, learningGoal: event.target.value }))} /></label>
+          <label>Teacher-approved source packet<textarea rows={10} value={packet.lessonText} onChange={(event) => onPacketChange((current) => ({ ...current, lessonText: event.target.value }))} /></label>
+          <div className="form-footer">
+            <button className="button primary" type="submit" disabled={busy !== "idle"} aria-busy={busy === "building"}>{busy === "building" ? "Building twin..." : "Build with GPT-5.6"}</button>
+            <button className="button text" type="button" onClick={onRestorePacket}>Restore Greenwater lesson</button>
+          </div>
+        </form>
+      </section>
+    </>
+  );
+}
+
 function SourceReview({ session, onApprove, onRestart }: { session: TeachBackSession; onApprove: () => void; onRestart: () => void }) {
   return (
     <section className="review-stage" aria-labelledby="review-title">
       <div className="stage-title">
-        <div><p className="eyebrow">Teacher gate · step 2</p><h2 id="review-title">Review what the twin is allowed to teach.</h2></div>
-        <p>Nothing is released to a student until you approve this map.</p>
+        <h2 id="review-title">See exactly what Nova may use.</h2>
+        <p>The teacher checks the source, the causal map, and the misconception before any student interaction begins.</p>
       </div>
       <div className="review-grid">
-        <section className="source-card">
-          <div className="card-heading"><span>01</span><div><p>Approved source</p><h3>Evidence anchors</h3></div></div>
+        <section className="source-panel">
+          <p className="panel-label">Approved source</p>
+          <h3>Evidence anchors</h3>
           <div className="anchor-list">
             {session.sourceMap.evidenceAnchors.map((anchor) => <blockquote key={anchor.label}><strong>{anchor.label}</strong><p>“{anchor.quote}”</p></blockquote>)}
           </div>
-          <details><summary>Read full source packet</summary><pre>{session.sourceText}</pre></details>
+          <details><summary>Read the full source packet</summary><pre>{session.sourceText}</pre></details>
         </section>
-        <section className="map-card">
-          <div className="card-heading"><span>02</span><div><p>Source-grounded map</p><h3>Concept relationships</h3></div></div>
+        <section className="map-panel">
+          <p className="panel-label">Source map</p>
+          <h3>Concept relationships</h3>
           <ol className="causal-chain">
             {session.sourceMap.causalChain.map((item, index) => <li key={item}><span>{index + 1}</span><p>{item}</p></li>)}
           </ol>
-          <div className="uncertainty"><strong>Boundary</strong>{session.sourceMap.uncertainty.map((item) => <p key={item}>{item}</p>)}</div>
+          <div className="uncertainty"><strong>What the source cannot prove</strong>{session.sourceMap.uncertainty.map((item) => <p key={item}>{item}</p>)}</div>
         </section>
-        <section className="twin-card">
-          <div className="card-heading"><span>03</span><div><p>Simulated novice</p><h3>Nova’s starting misconception</h3></div></div>
+        <aside className="twin-panel">
+          <p className="panel-label">Simulated novice</p>
+          <h3>Nova starts here.</h3>
           <p className="misconception">{session.twin.misconception}</p>
-          <p className="twin-disclosure">Nova is a structured simulation of a novice state. It does not know, remember, or judge the student.</p>
-          <div className="twin-preview"><span>NOVA ASKS</span><p>{session.twin.openingPrompt}</p></div>
-        </section>
+          <p className="twin-disclosure">Nova is a structured simulation. It does not know, remember, or judge the student.</p>
+          <div className="twin-preview"><strong>Nova asks</strong><p>{session.twin.openingPrompt}</p></div>
+        </aside>
       </div>
-      <div className="approval-bar"><div><strong>Ready to let a student teach this twin?</strong><span>Approval confirms that the source, learning goal, and misconception are appropriate for this activity.</span></div><div><button className="button ghost" type="button" onClick={onRestart}>Start over</button><button className="button primary" type="button" onClick={onApprove}>Approve &amp; begin</button></div></div>
+      <div className="approval-bar"><div><strong>Release this twin to a student?</strong><span>Approval confirms the source, learning goal, and misconception are appropriate for this activity.</span></div><div><button className="button ghost" type="button" onClick={onRestart}>Start over</button><button className="button primary" type="button" onClick={onApprove}>Approve and begin</button></div></div>
     </section>
   );
 }
@@ -272,10 +337,10 @@ function TeachStage({ session, prompt, stage, response, onResponse, onSubmit, on
   const isTransfer = stage === "transfer";
   return (
     <section className="teach-stage" aria-labelledby="teach-title">
-      <div className="stage-title"><div><p className="eyebrow">Student experience · step 3</p><h2 id="teach-title">Teach Nova your reasoning.</h2></div><p>{isTransfer ? "Transfer the idea to a new case—without reaching beyond the evidence." : "Explain the relationship, then show Nova where the evidence stops."}</p></div>
+      <div className="stage-title"><h2 id="teach-title">Teach Nova your reasoning.</h2><p>{isTransfer ? "Apply the idea to a new case without reaching beyond the evidence." : "Explain the relationship, then name where the evidence stops."}</p></div>
       <div className="teach-grid">
         <section className="dialogue-card" aria-label="TeachBack conversation">
-          <div className="dialogue-top"><div className="nova-avatar">N</div><div><strong>Nova</strong><span>Simulated novice · asks, does not grade</span></div><span className="stage-chip">{isTransfer ? "TRANSFER" : "TEACH-BACK"}</span></div>
+          <div className="dialogue-top"><div className="nova-avatar" aria-hidden="true">N</div><div><strong>Nova</strong><span>Simulated novice, asks and does not grade</span></div><span className="stage-chip">{isTransfer ? "Transfer" : "Teach back"}</span></div>
           <div className="conversation">
             {session.turns.map((turn, index) => (
               <div className="turn-pair" key={`${turn.stage}-${index}`}>
@@ -288,16 +353,16 @@ function TeachStage({ session, prompt, stage, response, onResponse, onSubmit, on
           </div>
           <form className="response-form" onSubmit={onSubmit}>
             <label htmlFor="teach-response">Your explanation</label>
-            <textarea id="teach-response" value={response} onChange={(event) => onResponse(event.target.value)} rows={5} placeholder={isTransfer ? "State what the new observation may suggest, then what cannot be concluded yet…" : "Teach Nova the causal chain in your own words. Use the source packet…"} />
-            <div className="response-actions"><span>{isTransfer ? "Aim for a careful conclusion, not a guess." : "Name the mechanism and the limit of the evidence."}</span><div>{onUseWorkedResponse && <button className="button text" type="button" onClick={onUseWorkedResponse}>Use worked demo reply</button>}<button className="button primary" type="submit" disabled={busy}>{busy ? "Nova is updating…" : isTransfer ? "Try the new case" : "Teach Nova"}</button></div></div>
+            <textarea id="teach-response" value={response} onChange={(event) => onResponse(event.target.value)} rows={5} placeholder={isTransfer ? "State what the new observation may suggest, then what cannot be concluded yet." : "Teach Nova the causal chain in your own words. Use the source packet."} />
+            <div className="response-actions"><span>{isTransfer ? "Aim for a careful conclusion, not a guess." : "Name the mechanism and the limit of the evidence."}</span><div>{onUseWorkedResponse && <button className="button text" type="button" onClick={onUseWorkedResponse}>Use worked reply</button>}<button className="button primary" type="submit" disabled={busy} aria-busy={busy}>{busy ? "Nova is updating..." : isTransfer ? "Try the new case" : "Teach Nova"}</button></div></div>
           </form>
         </section>
         <aside className="state-card" aria-label="Simulated learning state">
-          <div className="state-heading"><div><p>SIMULATED LEARNING STATE</p><h3>What Nova can now use</h3></div><span>{statusSummary(session)}</span></div>
+          <div className="state-heading"><div><p>Simulated learning state</p><h3>What Nova can now use</h3></div><span>{statusSummary(session)}</span></div>
           <ul className="concept-state">
-            {session.sourceMap.conceptNodes.map((node) => <li className={node.status} key={node.id}><span className="node-icon">{node.status === "grounded" ? "✓" : node.status === "needs-connection" ? "↗" : "?"}</span><div><strong>{node.label}</strong><p>{node.explanation}</p><small>{statusLabel(node.status)} · {node.sourceAnchor}</small></div></li>)}
+            {session.sourceMap.conceptNodes.map((node) => <li className={node.status} key={node.id}><span className="node-status">{statusLabel(node.status)}</span><div><strong>{node.label}</strong><p>{node.explanation}</p><small>{node.sourceAnchor}</small></div></li>)}
           </ul>
-          <div className="state-disclosure"><strong>Why this is visible</strong><p>The map is a transparent simulation state, not an estimate of a student’s intelligence or authorship.</p></div>
+          <div className="state-disclosure"><strong>What this means</strong><p>This is Nova’s transparent simulation state, not an estimate of a student’s intelligence or authorship.</p></div>
         </aside>
       </div>
     </section>
@@ -309,18 +374,17 @@ function TeacherReview({ session, onUpdate, onRestart }: { session: TeachBackSes
   const summary = session.summary;
   return (
     <section className="summary-stage" aria-labelledby="summary-title">
-      <div className="stage-title"><div><p className="eyebrow">Teacher review · step 4</p><h2 id="summary-title">A learning trace—not a verdict.</h2></div><p>Use the evidence for the next instructional conversation. Do not treat it as an automated grade or an integrity finding.</p></div>
+      <div className="stage-title"><h2 id="summary-title">A learning trace, not a verdict.</h2><p>Use this evidence for the next instructional conversation. It is not an automated grade or integrity finding.</p></div>
       <div className="summary-hero">
-        <div className="summary-mark">✓</div>
-        <div><p className="eyebrow">Transfer complete</p><h3>{summary?.headline ?? "The student completed the transfer check."}</h3><p>{summary?.teacherNote}</p></div>
-        <span className={approved ? "approval-state done" : "approval-state"}>{approved ? "TEACHER REVIEWED" : "AWAITING REVIEW"}</span>
+        <div><p className="summary-label">Transfer complete</p><h3>{summary?.headline ?? "The student completed the transfer check."}</h3><p>{summary?.teacherNote}</p></div>
+        <span className={approved ? "approval-state done" : "approval-state"}>{approved ? "Teacher reviewed" : "Awaiting review"}</span>
       </div>
       <div className="summary-grid">
-        <section className="evidence-summary"><h3>Evidence made visible</h3><ul>{summary?.demonstrated.map((item) => <li key={item}><span>✓</span>{item}</li>)}</ul></section>
-        <section className="next-step"><p>Suggested next step</p><h3>{summary?.nextStep}</h3><span>This is a draft for teacher judgment, not a prescribed intervention.</span></section>
+        <section className="evidence-summary"><h3>Evidence made visible</h3><ul>{summary?.demonstrated.map((item) => <li key={item}>{item}</li>)}</ul></section>
+        <section className="next-step"><p>Suggested next move</p><h3>{summary?.nextStep}</h3><span>This is a draft for teacher judgment, not a prescribed intervention.</span></section>
       </div>
-      <section className="trace-card"><div><p>Conversation trace</p><h3>What the student taught; what Nova could then transfer.</h3></div><ol>{session.turns.map((turn, index) => <li key={`${turn.stage}-${index}`}><span>{index + 1}</span><div><strong>{turn.stage === "explanation" ? "Teach-back" : "Transfer"}</strong><p>{turn.response}</p><small>{turn.coachNote}</small></div></li>)}</ol></section>
-      <div className="approval-bar"><div><strong>{approved ? "Teacher review recorded locally" : "Review this learning trace before using it."}</strong><span>{approved ? "Nothing has been saved to an account in this MVP." : "Approval is the final human gate; it does not change a grade."}</span></div><div><button className="button ghost" type="button" onClick={onRestart}>New session</button>{!approved && <button className="button primary" type="button" onClick={() => onUpdate(approveTeacherSummary(session))}>Approve learning note</button>}{approved && <button className="button primary" type="button" onClick={() => window.print()}>Print learning note</button>}</div></div>
+      <section className="trace-card"><div><p className="panel-label">Conversation trace</p><h3>What the student taught, then transferred.</h3></div><ol>{session.turns.map((turn, index) => <li key={`${turn.stage}-${index}`}><span>{turn.stage === "explanation" ? "Teach back" : "Transfer"}</span><div><p>{turn.response}</p><small>{turn.coachNote}</small></div></li>)}</ol></section>
+      <div className="approval-bar"><div><strong>{approved ? "Teacher review recorded locally." : "Review the learning trace before using it."}</strong><span>{approved ? "Nothing has been saved to an account in this MVP." : "Approval is the final human gate and does not change a grade."}</span></div><div><button className="button ghost" type="button" onClick={onRestart}>New lesson</button>{!approved && <button className="button primary" type="button" onClick={() => onUpdate(approveTeacherSummary(session))}>Approve learning note</button>}{approved && <button className="button primary" type="button" onClick={() => window.print()}>Print learning note</button>}</div></div>
     </section>
   );
 }

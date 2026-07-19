@@ -56,7 +56,7 @@ export async function POST(request: Request) {
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : "GENERATION_FAILED";
     if (message === "API_KEY_MISSING") return error("Live GPT-5.6 setup needs an OPENAI_API_KEY. The Greenwater demo works offline.", "api_unavailable", 503);
-    if (message === "INVALID_OUTPUT") return error("The twin could not produce a safe, structured update. Your response is still on this device—try again.", "invalid_output", 502);
-    return error("The twin could not respond right now. Your response is still on this device—try again.", "generation_failed", 502);
+    if (message === "INVALID_OUTPUT") return error("The twin could not produce a safe, structured update. Your response is still on this device. Try again.", "invalid_output", 502);
+    return error("The twin could not respond right now. Your response is still on this device. Try again.", "generation_failed", 502);
   }
 }
