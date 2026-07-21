@@ -91,17 +91,6 @@ npm run build
 
 The tests cover the offline flow, invalid input, literal source quotes, invented node IDs, and the route-level teacher-approval gate.
 
-## Recommended 2–3 minute demo video
-
-1. **0:00–0:20 — The problem.** “A polished answer is no longer enough evidence of reasoning. TeachBack gives a student a simulated novice they must teach.”
-2. **0:20–0:45 — Grounding.** Open the Greenwater demo. Show the teacher-approved source, literal evidence anchors, concept chain, and Nova’s single misconception.
-3. **0:45–1:30 — Teach-back.** Approve Nova. Submit the worked explanation and point to the visible state change: decomposition, oxygen, fish behavior, and the evidence boundary become grounded.
-4. **1:30–2:10 — Transfer.** Submit the worked transfer response. Explain that Nova asks a genuinely new case, so the student must separate a possible explanation from what the evidence proves.
-5. **2:10–2:35 — Teacher judgment.** Show the learning trace and state plainly: “This is not a grade or an AI-use finding; the teacher decides what to do next.”
-6. **2:35–2:55 — Technical proof.** Briefly show the live builder or code: GPT-5.6 produces structured source maps and turn updates; literal quotes and approved node IDs are validated server-side. Mention Codex’s contribution below.
-
-Record one successful live setup before recording the final video, then use the clearly labelled deterministic Greenwater path for a reliable walkthrough.
-
 ## Codex contribution
 
 Codex was used as a design and implementation partner to:
